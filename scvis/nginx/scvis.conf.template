@@ -1,0 +1,13 @@
+# Rendered by entrypoint.sh (placeholders substituted with sed) into
+# /etc/nginx/stream-enabled/scvis.conf for "web" mode.
+#
+# Unlike eevis-docker/irvis-docker, this is a raw TCP passthrough (nginx
+# `stream` module), not an HTTP reverse proxy: scvis-go always terminates its
+# own TLS (cmd/web/main.go calls ListenAndServeTLS unconditionally, there's
+# no plain-HTTP mode to proxy to), so nginx just forwards bytes on
+# __LISTEN_PORT__ to the app's __APP_PORT__ without ever decrypting them -
+# no extra certificate needed on the nginx side.
+server {
+    listen __LISTEN_PORT__;
+    proxy_pass 127.0.0.1:__APP_PORT__;
+}

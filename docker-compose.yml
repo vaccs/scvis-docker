@@ -1,0 +1,45 @@
+services:
+  vaccs:
+    build:
+      context: .
+      dockerfile: vaccs/Dockerfile
+    platform: linux/amd64
+    image: scvis-docker-vaccs:local
+    container_name: scvis-vaccs
+    environment:
+      REPO_URL: ${VACCS_REPO_URL:-https://github.com/vaccs/dynamic_analysis.git}
+      REPO_REF: ${VACCS_REPO_REF:-master}
+    restart: unless-stopped
+
+  scvis:
+    build:
+      context: .
+      dockerfile: scvis/Dockerfile
+    image: scvis-docker-scvis:local
+    container_name: scvis-app
+    depends_on:
+      vaccs:
+        condition: service_healthy
+    environment:
+      MODE: ${MODE:-local}
+      REPO_URL: ${SCVIS_REPO_URL:-https://github.com/vaccs/scvis-go.git}
+      REPO_REF: ${SCVIS_REPO_REF:-main}
+      DB_NAME: ${DB_NAME:-scvis}
+      DB_USER: ${DB_USER:-scvis}
+      DB_PASSWD: ${DB_PASSWD:-scvis_dev_password}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_OWNER: ${GITHUB_OWNER:-vaccs}
+      GITHUB_REPO: ${GITHUB_REPO:-scvis-go}
+      VACCS_HOST: vaccs
+      VACCS_PORT: 3580
+      SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-admin}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@scvis.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin1234}
+    ports:
+      - "${HOST_PORT:-8080}:8080"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    restart: unless-stopped
+
+volumes:
+  mysql-data:

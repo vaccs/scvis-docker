@@ -1,0 +1,18 @@
+# Overlay applied automatically by scripts/run.sh when an SSH agent socket is
+# available on the host, forwarding it into both containers so they could
+# clone scvis-go/dynamic_analysis over SSH using your existing loaded keys
+# (no keys are ever copied into the images). Both repos are public right now
+# so this isn't required, but it's kept for parity with eevis-docker/
+# irvis-docker in case either goes private again - see README.md for the
+# HTTPS+token alternative if you don't use ssh-agent.
+services:
+  scvis:
+    environment:
+      SSH_AUTH_SOCK: /ssh-agent
+    volumes:
+      - ${SSH_AUTH_SOCK_HOST}:/ssh-agent
+  vaccs:
+    environment:
+      SSH_AUTH_SOCK: /ssh-agent
+    volumes:
+      - ${SSH_AUTH_SOCK_HOST}:/ssh-agent
