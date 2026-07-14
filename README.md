@@ -21,12 +21,40 @@ Unlike eevis-docker/irvis-docker, this is **two containers**, not one:
 `scvis` talks to `vaccs` over the compose network (`vaccs:3580`) - see
 "scvis-go patch" below.
 
+## Apple Silicon: Pin doesn't run under Rosetta emulation
+
+Pin does its own low-level binary instrumentation (ptrace-based process
+injection), and that doesn't survive being run on top of Rosetta 2's own
+amd64->arm64 translation - even with every Docker restriction relaxed
+(`--cap-add=SYS_PTRACE --security-opt seccomp=unconfined --security-opt
+apparmor=unconfined`), Pin's injector fails with
+`Attach to pid N failed: Function not implemented`, and the target process
+gets killed. This is a platform limitation, not a scvis-docker bug - the
+`vaccs` container builds and starts fine on Apple Silicon, and the network
+handshake with `scvis` completes, but real analysis runs can't complete on
+this host.
+
+The fix is to run on genuine x86_64 hardware instead of translated amd64.
+This repo includes a `.devcontainer/devcontainer.json` for that: open it in
+a [GitHub Codespace](https://github.com/features/codespaces) (real x86_64
+Azure VMs, no emulation layer at all) and run `scripts/run.sh` there exactly
+as you would locally. Notes:
+
+- Uses the `docker-in-docker` devcontainer feature, since the Codespace
+  itself is a container.
+- Requests a 4-core/8GB machine - building Pin/cppcheck/scvis-go/MySQL
+  together is heavy; the Codespaces default (2-core) will be slow.
+- Codespaces' port-forwarding proxy sits in front of the forwarded port with
+  its own auth/HTTPS, separate from the plain-HTTP `local` mode described
+  below - so scvis is reached through GitHub's forwarding UI, not a bare
+  `http://localhost:8080`.
+
 ## Quick start
 
 ```bash
 cd scvis-docker
-scripts/run.sh          # "local" mode: app served directly
-scripts/run.sh web      # "web" mode: nginx passes through to the app
+scripts/run.sh          # "local" mode: nginx terminates TLS, served over plain HTTP
+scripts/run.sh web      # "web" mode: nginx passes the app's HTTPS through unchanged
 ```
 
 `run.sh`:
@@ -50,21 +78,28 @@ scripts/stop.sh --wipe-db    # stop and delete the MySQL volume
 
 ## The two modes
 
-- **local** - the compiled app binds `0.0.0.0:8080` inside the `scvis`
-  container and is exposed directly to the host.
-- **web** - the app binds `8081` (not published) and nginx listens on
-  `0.0.0.0:8080`. Unlike eevis-docker/irvis-docker, this is a raw **TCP
-  passthrough** (nginx's `stream` module), not an HTTP reverse proxy:
-  scvis-go's `cmd/web/main.go` always calls `ListenAndServeTLS` - there's no
-  plain-HTTP mode to proxy to - so nginx just forwards encrypted bytes
-  without ever terminating TLS itself.
+In both modes the compiled app binds `8081` (not published) inside the
+`scvis` container, and nginx listens on the published `0.0.0.0:8080`.
+scvis-go's `cmd/web/main.go` always calls `ListenAndServeTLS` with its own
+checked-in self-signed dev certificate (`tls/localhost.pem`) - there's no
+plain-HTTP mode built into the app - so the two modes differ in what nginx
+does with that TLS connection:
 
-In both modes the container's internal port is always 8080; only the *host*
-port that maps to it changes if 8080 is busy.
+- **local** (default) - nginx **terminates** the app's TLS itself and
+  re-serves plain HTTP to the host, so you get `http://127.0.0.1:8080/scvis/`
+  with no browser certificate warning. It also strips the `Secure` flag off
+  the app's session cookie (which scvis-go always sets, regardless of
+  scheme) so logging in still works over plain HTTP. See
+  `scvis/nginx/scvis-local.conf.template`.
+- **web** - nginx does a raw **TCP passthrough** (the `stream` module)
+  instead, forwarding encrypted bytes without ever decrypting them, so the
+  self-signed cert reaches the browser as-is - exactly as it would running
+  scvis-go natively. Unlike eevis-docker/irvis-docker this is not an HTTP
+  reverse proxy, since there's no plain-HTTP backend to proxy to. See
+  `scvis/nginx/scvis.conf.template`.
 
-The app always serves HTTPS with scvis-go's own checked-in self-signed dev
-certificate (`tls/localhost.pem`) - your browser will warn about it, exactly
-as it would running scvis-go natively.
+In both modes the container's internal (published) port is always 8080; only
+the *host* port that maps to it changes if 8080 is busy.
 
 ## Configuration
 
@@ -94,14 +129,17 @@ so `vaccs/entrypoint.sh` does a plain clone that doesn't fetch it.
 
 ## scvis-go patch: configurable VACCS host
 
-`scvis-go`'s `internal/vaccs/vaccs_comm.go` originally hardcoded
-`net.DialTimeout("tcp", "localhost:3580", ...)`. Since `vaccs` now runs in
-its own container (needed for the amd64/Pin requirement), this repo depends
-on a small patch to `scvis-go` (applied to your local `scvis-go` checkout,
-not shipped from here) that reads the host/port from `VACCS_HOST`/
-`VACCS_PORT` env vars, defaulting to `localhost:3580` so non-Docker/native
-behavior is unchanged. `docker-compose.yml` sets `VACCS_HOST=vaccs` for the
-`scvis` service so it reaches the analyzer over the compose network.
+Upstream `scvis-go`'s `internal/vaccs/vaccs_comm.go` hardcodes
+`net.DialTimeout("tcp", "localhost:3580", ...)`. Since `vaccs` runs in its
+own container here (needed for the amd64/Pin requirement), that address is
+unreachable - it's only reachable as `vaccs:3580` over the compose network -
+so `scvis/entrypoint.sh` patches the freshly-cloned source on every start
+(`sed`, right after the clone/fetch step, before compiling) to read the
+host/port from `VACCS_HOST`/`VACCS_PORT` env vars instead, falling back to
+`localhost:3580` unchanged when they're unset so native/non-Docker use is
+unaffected. `docker-compose.yml` sets `VACCS_HOST=vaccs` for the `scvis`
+service so it reaches the analyzer over the compose network. Nothing needs
+to be forked or patched upstream for this to work.
 
 ## Database schema
 
@@ -133,6 +171,7 @@ each.
 |---|---|
 | `scvis/Dockerfile`, `scvis/entrypoint.sh` | scvis-go + MySQL container |
 | `scvis/nginx/scvis.conf.template` | TCP-passthrough config used in `web` mode |
+| `scvis/nginx/scvis-local.conf.template` | TLS-terminating HTTP reverse proxy config used in `local` mode |
 | `vaccs/Dockerfile`, `vaccs/entrypoint.sh` | dynamic_analysis (VACCS/Pin) container, amd64 |
 | `mysql-init/schema.sql` | Authoritative DB schema, applied on every start |
 | `docker-compose.yml` | Both services |
@@ -141,3 +180,4 @@ each.
 | `scripts/run.sh` | Main entry point (see Quick start) |
 | `scripts/stop.sh` | Tears the containers down |
 | `scripts/lib.sh` | Shared shell helpers |
+| `.devcontainer/devcontainer.json` | GitHub Codespaces config (native x86_64, see Apple Silicon note above) |

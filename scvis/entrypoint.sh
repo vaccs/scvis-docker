@@ -4,7 +4,7 @@ set -euo pipefail
 MODE="${MODE:-local}"                       # local | web
 CONTAINER_PORT=8080                         # fixed internal port (see Dockerfile EXPOSE);
                                              # the host port it's mapped to is chosen by scripts/run.sh
-APP_INTERNAL_PORT="${APP_INTERNAL_PORT:-8081}"  # app port behind nginx, web mode only
+APP_INTERNAL_PORT="${APP_INTERNAL_PORT:-8081}"  # app port behind nginx (both modes)
 
 REPO_URL="${REPO_URL:-https://github.com/vaccs/scvis-go.git}"
 REPO_REF="${REPO_REF:-main}"
@@ -85,6 +85,38 @@ else
     log "Cloning ${REPO_URL} (${REPO_REF}) into ${SRC_DIR}..."
     rm -rf "${SRC_DIR}"
     git clone --depth 1 --branch "${REPO_REF}" "${REPO_URL}" "${SRC_DIR}"
+fi
+
+# ---------------------------------------------------------------------------
+# 3b. Patch a known gap in upstream scvis-go: internal/vaccs/vaccs_comm.go
+#     hardcodes "localhost:3580", but here vaccs runs in its own container -
+#     reachable only as vaccs:3580 over the compose network - so analysis
+#     requests would otherwise always fail with "connection refused". Point
+#     it at VACCS_HOST/VACCS_PORT instead (falls back to localhost:3580
+#     unchanged when unset, so native/non-Docker use is unaffected). Applied
+#     fresh every start since step 3 always resets SRC_DIR to pristine
+#     upstream content.
+# ---------------------------------------------------------------------------
+VACCS_COMM_FILE="${SRC_DIR}/internal/vaccs/vaccs_comm.go"
+if [ -f "${VACCS_COMM_FILE}" ] && ! grep -q 'func vaccsAddr' "${VACCS_COMM_FILE}"; then
+    log "Patching ${VACCS_COMM_FILE} to read VACCS_HOST/VACCS_PORT..."
+    sed -i '/^\t"net"$/a\\t"os"' "${VACCS_COMM_FILE}"
+    sed -i 's#net\.DialTimeout("tcp", "localhost:3580", \(10\|2\)\*time\.Second)#net.DialTimeout("tcp", vaccsAddr(), \1*time.Second)#' "${VACCS_COMM_FILE}"
+    sed -i 's#vc\.logger\.Info("Connecting to localhost:3580")#vc.logger.Info("Connecting to " + vaccsAddr())#' "${VACCS_COMM_FILE}"
+    cat >> "${VACCS_COMM_FILE}" <<'GOEOF'
+
+func vaccsAddr() string {
+	host := os.Getenv("VACCS_HOST")
+	if host == "" {
+		host = "localhost"
+	}
+	port := os.Getenv("VACCS_PORT")
+	if port == "" {
+		port = "3580"
+	}
+	return host + ":" + port
+}
+GOEOF
 fi
 
 # ---------------------------------------------------------------------------
@@ -169,23 +201,34 @@ log "Build complete."
 
 # ---------------------------------------------------------------------------
 # 7. Configure networking for the chosen mode, then hand off to the app.
-#    scvis-go always serves HTTPS itself (no plain-HTTP mode), so "web" mode
-#    uses an nginx TCP passthrough (stream module), not an HTTP reverse
-#    proxy - see nginx/scvis.conf.template.
+#    scvis-go always serves HTTPS itself (no plain-HTTP mode - see README),
+#    so the app always listens on APP_INTERNAL_PORT with nginx fronting it on
+#    CONTAINER_PORT:
+#      - "web"   mode: raw TCP passthrough (nginx stream module never
+#                 decrypts) - the self-signed dev cert reaches the browser
+#                 as-is, same as running scvis-go natively. See
+#                 nginx/scvis.conf.template.
+#      - "local" mode: nginx terminates the app's self-signed TLS itself and
+#                 re-serves plain HTTP, so the host can reach it with no
+#                 browser certificate warning. See
+#                 nginx/scvis-local.conf.template.
 # ---------------------------------------------------------------------------
-if [ "${MODE}" = "web" ]; then
-    log "Mode=web: nginx will listen on ${CONTAINER_PORT} and pass through to app on 127.0.0.1:${APP_INTERNAL_PORT}"
-    sed -i "s/^PORT=.*/PORT=${APP_INTERNAL_PORT}/" "${SRC_DIR}/.env"
+sed -i "s/^PORT=.*/PORT=${APP_INTERNAL_PORT}/" "${SRC_DIR}/.env"
 
+if [ "${MODE}" = "web" ]; then
+    log "Mode=web: nginx will TCP-passthrough ${CONTAINER_PORT} to the app's HTTPS on 127.0.0.1:${APP_INTERNAL_PORT}"
     sed -e "s/__LISTEN_PORT__/${CONTAINER_PORT}/g" \
         -e "s/__APP_PORT__/${APP_INTERNAL_PORT}/g" \
         /etc/nginx/stream-templates/scvis.conf.template > /etc/nginx/stream-enabled/scvis.conf
-
-    log "Starting nginx..."
-    nginx
 else
-    log "Mode=local: app will listen directly on 0.0.0.0:${CONTAINER_PORT}"
+    log "Mode=local: nginx will terminate TLS and serve plain HTTP on ${CONTAINER_PORT}, proxying to the app's HTTPS on 127.0.0.1:${APP_INTERNAL_PORT}"
+    sed -e "s/__LISTEN_PORT__/${CONTAINER_PORT}/g" \
+        -e "s/__APP_PORT__/${APP_INTERNAL_PORT}/g" \
+        /etc/nginx/http-templates/scvis-local.conf.template > /etc/nginx/conf.d/scvis-local.conf
 fi
+
+log "Starting nginx..."
+nginx
 
 log "Waiting for vaccs analyzer at ${VACCS_HOST}:${VACCS_PORT}..."
 for i in $(seq 1 60); do

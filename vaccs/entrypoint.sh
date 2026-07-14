@@ -3,7 +3,11 @@ set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/vaccs/dynamic_analysis.git}"
 REPO_REF="${REPO_REF:-master}"
-SRC_DIR="/opt/vaccs-src"
+# Must be /opt/dynamic_analysis: dynamic_analysis's own vaccs_comm/vaccs_comm.h
+# hardcodes absolute paths (COMPILE_COMMAND, ANALYZE_COMMAND, LOGFILE_DIR)
+# under this exact directory - cloning anywhere else silently breaks the
+# compile/analyze steps vc shells out to per request.
+SRC_DIR="/opt/dynamic_analysis"
 
 log() { echo "[entrypoint] $*"; }
 

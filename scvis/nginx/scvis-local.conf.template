@@ -1,0 +1,26 @@
+# Rendered by entrypoint.sh (placeholders substituted with sed) into
+# /etc/nginx/conf.d/scvis-local.conf for "local" mode.
+#
+# scvis-go always terminates its own TLS (cmd/web/main.go calls
+# ListenAndServeTLS unconditionally, there's no plain-HTTP mode - see
+# README.md), so this proxies to the app over HTTPS and ignores its
+# self-signed dev certificate, terminating TLS here so the host can talk to
+# it over plain HTTP with no browser certificate warning.
+#
+# scvis-go's session cookie always sets Secure=true (sessionManager.Cookie.
+# Secure in cmd/web/main.go) regardless of the front-end scheme, so the
+# Secure flag is stripped from Set-Cookie on the way out - otherwise the
+# browser would refuse to store/send it over plain HTTP and login would
+# silently break.
+server {
+    listen __LISTEN_PORT__;
+
+    location / {
+        proxy_pass https://127.0.0.1:__APP_PORT__;
+        proxy_ssl_verify off;
+        proxy_cookie_flags ~ nosecure;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

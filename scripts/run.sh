@@ -66,8 +66,14 @@ echo "First run builds the VACCS/Pin analyzer from source under amd64"
 echo "emulation plus scvis-go and MySQL - this can take a good while."
 docker compose "${COMPOSE_FILES[@]}" up -d --build
 
+if [ "$MODE" = "web" ]; then
+    SCHEME="https"
+else
+    SCHEME="http"
+fi
+
 echo "== Waiting for scvis to become healthy =="
-HEALTH_URL="https://127.0.0.1:${HOST_PORT}/scvis/"
+HEALTH_URL="${SCHEME}://127.0.0.1:${HOST_PORT}/scvis/"
 READY=0
 for _ in $(seq 1 180); do
     if curl -kfs "$HEALTH_URL" >/dev/null 2>&1; then
@@ -83,10 +89,12 @@ if [ "$READY" -ne 1 ]; then
     exit 1
 fi
 
-APP_URL="https://127.0.0.1:${HOST_PORT}/scvis/"
+APP_URL="${SCHEME}://127.0.0.1:${HOST_PORT}/scvis/"
 echo ""
 echo "scvis is up: $APP_URL"
-echo "(self-signed dev certificate - your browser will warn about it, same as running scvis-go natively)"
+if [ "$MODE" = "web" ]; then
+    echo "(self-signed dev certificate - your browser will warn about it, same as running scvis-go natively)"
+fi
 echo "Default admin login (first run only): ${SEED_ADMIN_NAME:-admin} / ${SEED_ADMIN_PASSWORD:-admin1234}"
 echo "Logs:   docker compose logs -f scvis vaccs"
 echo "Stop:   scripts/stop.sh"

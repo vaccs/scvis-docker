@@ -1,0 +1,27 @@
+{
+  "name": "scvis-docker (native amd64, no Rosetta/QEMU emulation)",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "moby": true
+    }
+  },
+  // Building dynamic_analysis (Pin/cppcheck) + scvis-go + MySQL all at once
+  // is heavy - Codespaces' 2-core default will be slow. 4 cores/8GB is a
+  // reasonable minimum; bump further if builds still feel sluggish.
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "8gb",
+    "storage": "32gb"
+  },
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": {
+      "label": "scvis (local mode, plain HTTP)",
+      "protocol": "http"
+    }
+  },
+  "postCreateCommand": "docker version",
+  "remoteUser": "vscode"
+}
