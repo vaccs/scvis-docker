@@ -30,8 +30,8 @@ services:
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_OWNER: ${GITHUB_OWNER:-vaccs}
       GITHUB_REPO: ${GITHUB_REPO:-scvis-go}
-      VACCS_HOST: vaccs
-      VACCS_PORT: 3580
+      VACCS_HOST: ${VACCS_HOST:-vaccs}
+      VACCS_PORT: ${VACCS_PORT:-3580}
       SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-admin}
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@scvis.local}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin1234}
