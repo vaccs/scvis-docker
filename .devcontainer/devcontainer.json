@@ -5,6 +5,9 @@
     "ghcr.io/devcontainers/features/docker-in-docker:2": {
       "version": "latest",
       "moby": true
+    },
+    "ghcr.io/devcontainers/features/sshd:1": {
+      "version": "latest"
     }
   },
   // Building dynamic_analysis (Pin/cppcheck) + scvis-go + MySQL all at once

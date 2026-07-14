@@ -105,7 +105,27 @@ CODESPACE_NAME="$(gh codespace list --repo "$REPO" --json name,state -q '[.[] | 
 
 if [ -z "$CODESPACE_NAME" ] || [ "$CODESPACE_NAME" = "null" ]; then
     echo "No existing Codespace found for $REPO - creating one (first run can take a few minutes)..."
-    CODESPACE_NAME="$(gh codespace create --repo "$REPO")"
+
+    # `gh codespace create` prompts interactively for a machine type if -m
+    # isn't given, which fails outright ("no terminal") in a non-interactive
+    # script - so pick one ourselves: the cheapest machine that still meets
+    # devcontainer.json's hostRequirements (cpus>=4), falling back to the
+    # cheapest available at all if somehow none qualify.
+    MACHINE="$(gh api "repos/$REPO/codespaces/machines" --jq '
+        [.machines[] | select(.cpus >= 4)] as $eligible
+        | if ($eligible | length) > 0 then
+            ($eligible | sort_by(.cpus) | .[0].name)
+          else
+            (.machines | sort_by(.cpus) | .[0].name // empty)
+          end
+    ' 2>/dev/null || true)"
+    if [ -z "$MACHINE" ]; then
+        echo "ERROR: couldn't determine an available machine type for $REPO." >&2
+        exit 1
+    fi
+    echo "Using machine type: $MACHINE"
+
+    CODESPACE_NAME="$(gh codespace create --repo "$REPO" --machine "$MACHINE")"
 else
     echo "Reusing existing Codespace: $CODESPACE_NAME"
 fi
