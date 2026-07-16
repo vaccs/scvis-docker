@@ -98,6 +98,7 @@ Stop it with:
 ```bash
 scripts/stop.sh              # stop, keep the database
 scripts/stop.sh --wipe-db    # stop and delete the MySQL volume
+scripts/stop.sh --debug      # also save vaccs's error log to ./vaccs_error.log first
 ```
 
 ## The two modes
