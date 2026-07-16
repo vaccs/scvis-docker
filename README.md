@@ -55,62 +55,23 @@ as you would locally. Notes:
   below - so scvis is reached through GitHub's forwarding UI, not a bare
   `http://localhost:8080`.
 
-### Running vaccs in a Codespace while scvis stays local
+### Why both services run together in the Codespace
 
-`scvis` itself has no architecture issues (pure Go/MySQL/nginx) and builds
-faster natively on your Mac than inside a Codespace VM, so instead of
-running both services in the Codespace you can split them: `vaccs` runs
-remotely for real x86_64, `scvis` runs locally and talks to it over a
-tunneled port.
-
-**One command** (needs the [gh CLI](https://cli.github.com/) installed):
-
-```bash
-scripts/run-codespace.sh          # "local" mode, same as scripts/run.sh
-scripts/run-codespace.sh web      # "web" mode
-```
-
-If `gh` isn't authenticated, is missing the `codespace` scope, or doesn't
-have write access to the target repo (needed to create a Codespace on it),
-`run-codespace.sh` runs `scripts/fix-codespace-permissions.sh` automatically
-to sort it out - it prompts before making any change (logging in, adding the
-scope, or forking the repo to your account if you don't have write access to
-it), same as `install-prereqs.sh` does for Docker.
-
-It finds an existing Codespace for this repo or creates one, builds/starts
-`vaccs` there, opens the port tunnel, then builds/starts `scvis` locally
-against it - holding the tunnel open in the foreground until you Ctrl+C
-(which only closes the tunnel; `scvis` and the Codespace keep running). You
-can also set `CODESPACE_REPO=owner/repo` yourself beforehand to target a
-specific repo (e.g. your own fork) instead of letting the fix script fork
-one for you.
-
-That script is just automating these steps, in case you want to run them
-by hand or adapt the flow:
-
-1. Create a Codespace on this repo (see above), but only bring up `vaccs`
-   there: `docker compose up -d --build vaccs`.
-2. `gh codespace list` shows your Codespaces by name - you need the specific
-   name for the next step, since a repo can have more than one running.
-3. `vaccs` speaks a raw custom TCP protocol on port 3580, not HTTP, so
-   GitHub's normal browser-facing port forwarding (the `*.app.github.dev`
-   URLs) can't carry it - that proxy only understands HTTP(S). Open a real
-   TCP tunnel instead:
-
-   ```bash
-   gh codespace ports forward 3580:3580 -c <codespace-name>
-   ```
-
-   This binds `127.0.0.1:3580` on your Mac and tunnels it to the Codespace.
-4. In your local `.env`, set `VACCS_HOST=host.docker.internal` and
-   `VACCS_PORT=3580` (`host.docker.internal` is Docker Desktop's DNS name
-   for reaching the Mac host from inside a container - `scvis` needs that,
-   not `127.0.0.1`, since `127.0.0.1` inside the container means itself).
-5. Start `scvis` locally without also starting a local `vaccs`:
-
-   ```bash
-   docker compose up -d --build --no-deps scvis
-   ```
+An earlier version of this setup tried to run `vaccs` in a Codespace while
+keeping `scvis` local, tunneling `vaccs`'s port back over `gh codespace
+ports forward` (or raw `ssh -L`, which turned out to share the same
+underlying transport - both go through `gh cs ssh --stdio`). That doesn't
+work: `vaccs_comm`'s protocol is a series of small, low-latency binary
+messages, and bytes reliably went missing somewhere in GitHub's Codespaces
+port-forwarding path - every single test connection failed at the very
+first message, with the client seeing a clean write locally but `vaccs`
+never receiving the bytes at all. This isn't a scvis-docker bug - it's a
+limitation of that transport for this kind of raw, low-latency protocol -
+so there's no tunnel-based split here. Run both services in the Codespace
+(`scripts/run.sh`, same as locally); `vaccs_comm` traffic then stays on the
+Codespace's own Docker network the whole time, exactly as it would on real
+x86_64 hardware, and only ordinary HTTP (browser to `scvis`) goes through
+Codespaces' (well-tested) port forwarding.
 
 ## Quick start
 
@@ -240,9 +201,7 @@ each.
 | `docker-compose.yml` | Both services |
 | `docker-compose.ssh-agent.yml` | Overlay adding ssh-agent forwarding to both |
 | `scripts/install-prereqs.sh` | Installs/starts Docker if missing |
-| `scripts/run.sh` | Main entry point (see Quick start) |
-| `scripts/run-codespace.sh` | Runs vaccs in a Codespace + scvis locally (see Apple Silicon note above) |
-| `scripts/fix-codespace-permissions.sh` | Auto-run by run-codespace.sh to fix gh auth/scope/repo-access issues |
+| `scripts/run.sh` | Main entry point (see Quick start) - also what to run inside a Codespace |
 | `scripts/stop.sh` | Tears the containers down |
 | `scripts/lib.sh` | Shared shell helpers |
 | `.devcontainer/devcontainer.json` | GitHub Codespaces config (native x86_64, see Apple Silicon note above) |
