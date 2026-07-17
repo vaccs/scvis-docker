@@ -103,6 +103,7 @@ dev machine and in the devcontainer.
 ## Quick start
 
 ```bash
+git clone https://github.com/vaccs/scvis-docker.git
 cd scvis-docker
 scripts/run.sh          # "local" mode: nginx terminates TLS, served over plain HTTP
 scripts/run.sh web      # "web" mode: nginx passes the app's HTTPS through unchanged
