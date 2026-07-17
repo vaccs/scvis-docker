@@ -19,6 +19,9 @@ server {
         proxy_pass https://127.0.0.1:__APP_PORT__;
         proxy_ssl_verify off;
         proxy_cookie_flags ~ nosecure;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
