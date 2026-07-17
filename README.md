@@ -73,6 +73,33 @@ Codespace's own Docker network the whole time, exactly as it would on real
 x86_64 hardware, and only ordinary HTTP (browser to `scvis`) goes through
 Codespaces' (well-tested) port forwarding.
 
+## Prerequisites
+
+Just Docker + Compose v2. `run.sh` checks for these and, if missing, offers
+to install/start them for you (`scripts/install-prereqs.sh`) - but that
+auto-install path needs permissions you may not have:
+
+- **Linux**: `sudo`, to run `get.docker.com`, enable the `docker` systemd
+  service, install `docker-compose-plugin`, and add you to the `docker`
+  group. If you were just added to that group, log out and back in (or run
+  `newgrp docker`) before re-running - group membership doesn't take effect
+  in the shell you're already in, so the very next command can still fail
+  even though the install "succeeded".
+- **macOS**: Homebrew + admin rights, to install Docker Desktop via
+  `brew install --cask docker`.
+
+If you don't have those permissions and Docker isn't already installed and
+running, `install-prereqs.sh` will simply fail (either the `confirm` prompt
+has nothing useful to say yes to, or the `sudo`/Homebrew call itself fails).
+Either get Docker installed some other way (ask whoever administers the
+machine), or use the GitHub Codespace described below - it provisions
+Docker inside the Codespace VM itself, so it works with no local install
+permissions at all, not just as an Apple Silicon workaround.
+
+`curl` is also assumed to be on the host (used by both the install check
+and `run.sh`'s health-check loop) - present by default on virtually every
+dev machine and in the devcontainer.
+
 ## Quick start
 
 ```bash
