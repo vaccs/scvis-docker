@@ -86,9 +86,47 @@ install_docker_linux() {
     fi
 }
 
+install_docker_windows() {
+    if ! have_cmd docker; then
+        if have_cmd winget; then
+            if confirm "Docker is not installed. Install Docker Desktop via winget now?"; then
+                winget install -e --id Docker.DockerDesktop --source winget
+            else
+                echo "Please install Docker Desktop manually: https://www.docker.com/products/docker-desktop/"
+                exit 1
+            fi
+        else
+            echo "winget not found. Please install Docker Desktop manually: https://www.docker.com/products/docker-desktop/"
+            exit 1
+        fi
+    fi
+
+    if ! docker info >/dev/null 2>&1; then
+        local docker_exe="/c/Program Files/Docker/Docker/Docker Desktop.exe"
+        if [ -f "$docker_exe" ]; then
+            echo "Starting Docker Desktop..."
+            "$docker_exe" &
+        else
+            echo "Docker Desktop isn't running - please start it from the Start menu."
+        fi
+        echo -n "Waiting for the Docker daemon to come up"
+        for _ in $(seq 1 60); do
+            docker info >/dev/null 2>&1 && { echo; return 0; }
+            echo -n "."
+            sleep 2
+        done
+        echo
+        echo "Docker Desktop hasn't finished starting yet."
+        echo "It may need one-time manual setup (WSL2 install / license)."
+        echo "Open the Docker Desktop app, complete any prompts, then re-run this script."
+        exit 1
+    fi
+}
+
 case "$OS" in
-    darwin) install_docker_darwin ;;
-    linux)  install_docker_linux ;;
+    darwin)  install_docker_darwin ;;
+    linux)   install_docker_linux ;;
+    windows) install_docker_windows ;;
     *)
         echo "Unsupported OS for auto-install: $(uname -s)"
         echo "Please install Docker + Compose v2 manually: https://docs.docker.com/get-docker/"

@@ -87,6 +87,9 @@ auto-install path needs permissions you may not have:
   even though the install "succeeded".
 - **macOS**: Homebrew + admin rights, to install Docker Desktop via
   `brew install --cask docker`.
+- **Windows**: run the scripts from a bash shell (Git Bash, or WSL) - they
+  aren't PowerShell/cmd scripts. `winget` + admin rights, to install Docker
+  Desktop via `winget install -e --id Docker.DockerDesktop`.
 
 If you don't have those permissions and Docker isn't already installed and
 running, `install-prereqs.sh` will simply fail (either the `confirm` prompt
