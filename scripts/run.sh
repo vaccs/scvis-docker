@@ -1,22 +1,26 @@
 #!/bin/bash
 # Launch scvis-go (+ its VACCS/Pin analyzer) locally in Docker.
 #
-# Usage: scripts/run.sh [local|web] [--no-browser]
+# Usage: scripts/run.sh [local|web] [--no-browser] [--no-codespace]
 #   local  (default) - app is reachable directly on the host port
 #   web            - nginx TCP-passes-through to the app (it always
 #                    terminates its own TLS, see README.md)
+#   --no-codespace - skip the non-x86_64 auto-handoff below, stay local
+#                    even though vaccs's Pin-based analysis won't work
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 source ./scripts/lib.sh
 
 MODE="local"
 OPEN_BROWSER=1
+FORCE_LOCAL=0
 for arg in "$@"; do
     case "$arg" in
         local|web) MODE="$arg" ;;
         --no-browser) OPEN_BROWSER=0 ;;
+        --no-codespace) FORCE_LOCAL=1 ;;
         -h|--help)
-            echo "Usage: $0 [local|web] [--no-browser]"
+            echo "Usage: $0 [local|web] [--no-browser] [--no-codespace]"
             exit 0
             ;;
         *)
@@ -25,6 +29,27 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# ---------------------------------------------------------------------------
+# vaccs's Pin-based analyzer needs real x86_64 - Pin's ptrace-based
+# instrumentation doesn't work under Rosetta/QEMU emulation (see README.md's
+# "Pin doesn't run under Rosetta emulation" section). On a non-x86_64 host,
+# hand off to a GitHub Codespace (both services run there together, no
+# tunnel involved) instead of building a vaccs that can't actually analyze
+# anything. --no-codespace bypasses this if you want scvis up locally
+# anyway - e.g. to work on scvis-go itself without needing real analysis.
+# ---------------------------------------------------------------------------
+if [ "$FORCE_LOCAL" -ne 1 ] && [ "$(uname -m)" != "x86_64" ]; then
+    if [ "$MODE" = "web" ]; then
+        echo "Note: 'web' mode isn't meaningful through Codespaces port forwarding" >&2
+        echo "(GitHub's forwarding proxy already provides its own HTTPS) - using local mode there instead." >&2
+    fi
+    HANDOFF_ARGS=()
+    if [ "$OPEN_BROWSER" -eq 0 ]; then
+        HANDOFF_ARGS+=(--no-browser)
+    fi
+    exec ./scripts/run-in-codespace.sh "${HANDOFF_ARGS[@]}"
+fi
 
 echo "== Checking Docker installation =="
 ./scripts/install-prereqs.sh
