@@ -40,20 +40,37 @@ gets killed. This is a platform limitation, not a scvis-docker bug - the
 handshake with `scvis` completes, but real analysis runs can't complete on
 this host.
 
-The fix is to run on genuine x86_64 hardware instead of translated amd64.
-This repo includes a `.devcontainer/devcontainer.json` for that: open it in
-a [GitHub Codespace](https://github.com/features/codespaces) (real x86_64
-Azure VMs, no emulation layer at all) and run `scripts/run.sh` there exactly
-as you would locally. Notes:
+The fix is to run on genuine x86_64 hardware instead of translated amd64,
+and `scripts/run.sh` does this automatically: it detects `uname -m !=
+x86_64` and hands off to `scripts/run-in-codespace.sh`, which:
 
-- Uses the `docker-in-docker` devcontainer feature, since the Codespace
-  itself is a container.
+1. Finds or creates a [GitHub Codespace](https://github.com/features/codespaces)
+   for this repo (real x86_64 Azure VMs, no emulation layer at all) -
+   authenticating `gh` and fixing its permissions automatically if needed
+   (`scripts/fix-codespace-permissions.sh`: logs in, adds the `codespace`
+   scope, or forks the repo if you don't have write access to it - prompting
+   before each change).
+2. Runs `scripts/run.sh` *inside* the Codespace over SSH - both `scvis` and
+   `vaccs` end up running together there (see "Why both services run
+   together" below).
+3. Prints the forwarded HTTPS URL
+   (`https://<codespace-name>-<port>.app.github.dev`) and opens it in your
+   local browser.
+
+Pass `--no-codespace` to skip all of this and stay local anyway (e.g. to
+work on `scvis-go` itself without needing real analysis to work).
+
+Notes on the Codespace itself:
+
+- Uses the `docker-in-docker` and `sshd` devcontainer features - the
+  Codespace itself is a container, and `gh codespace ssh` needs an SSH
+  server inside it.
 - Requests a 4-core/8GB machine - building Pin/cppcheck/scvis-go/MySQL
   together is heavy; the Codespaces default (2-core) will be slow.
-- Codespaces' port-forwarding proxy sits in front of the forwarded port with
-  its own auth/HTTPS, separate from the plain-HTTP `local` mode described
-  below - so scvis is reached through GitHub's forwarding UI, not a bare
-  `http://localhost:8080`.
+- The forwarded port is private by default - it opens fine in a browser
+  you're already logged into GitHub with; `run-in-codespace.sh` prints the
+  command to make it public if you want to share the link with someone
+  else.
 
 ### Why both services run together in the Codespace
 
@@ -67,11 +84,16 @@ port-forwarding path - every single test connection failed at the very
 first message, with the client seeing a clean write locally but `vaccs`
 never receiving the bytes at all. This isn't a scvis-docker bug - it's a
 limitation of that transport for this kind of raw, low-latency protocol -
-so there's no tunnel-based split here. Run both services in the Codespace
-(`scripts/run.sh`, same as locally); `vaccs_comm` traffic then stays on the
-Codespace's own Docker network the whole time, exactly as it would on real
-x86_64 hardware, and only ordinary HTTP (browser to `scvis`) goes through
-Codespaces' (well-tested) port forwarding.
+so there's no tunnel-based split here - `scripts/run-in-codespace.sh` runs
+both services together in the Codespace (`scripts/run.sh`, same as it would
+locally), so `vaccs_comm` traffic stays on the Codespace's own Docker
+network the whole time, exactly as it would on real x86_64 hardware, and
+only ordinary HTTP (browser to `scvis`) goes through Codespaces' port
+forwarding - which, unlike the raw-TCP `ports forward` CLI command, is
+GitHub's well-tested primary mechanism (confirmed live: a port becomes
+forwardable via its `browseUrl` either from a static `devcontainer.json`
+declaration, like `scvis`'s port 8080, or via a one-time `ports forward`
+registration nudge for anything else - see `run-in-codespace.sh`).
 
 ## Prerequisites
 
@@ -113,16 +135,20 @@ scripts/run.sh web      # "web" mode: nginx passes the app's HTTPS through uncha
 ```
 
 `run.sh`:
-1. Checks that Docker + Compose v2 are installed and the daemon is running -
+1. On a non-x86_64 host, hands off to a GitHub Codespace instead (see "Pin
+   doesn't run under Rosetta emulation" above) - the rest of this list then
+   happens *inside* the Codespace. `--no-codespace` skips this.
+2. Checks that Docker + Compose v2 are installed and the daemon is running -
    installs/starts them if not (asks before making any system change).
-2. Forwards your ssh-agent into both containers if one is available (not
+3. Forwards your ssh-agent into both containers if one is available (not
    required - both upstream repos are public, see below).
-3. Picks a host port, starting at 8080 and moving up if it's already taken.
-4. Runs `docker compose up --build` (the first run is slow - it compiles
+4. Picks a host port, starting at 8080 and moving up if it's already taken.
+5. Runs `docker compose up --build` (the first run is slow - it compiles
    dynamic_analysis + cppcheck from source under amd64 emulation, plus
    scvis-go and MySQL).
-5. Waits for the app to respond.
-6. Opens your default browser to it.
+6. Waits for the app to respond.
+7. Opens your default browser to it (a Codespace's forwarded HTTPS URL, if
+   step 1 applied).
 
 Stop it with:
 
@@ -233,7 +259,9 @@ each.
 | `docker-compose.yml` | Both services |
 | `docker-compose.ssh-agent.yml` | Overlay adding ssh-agent forwarding to both |
 | `scripts/install-prereqs.sh` | Installs/starts Docker if missing |
-| `scripts/run.sh` | Main entry point (see Quick start) - also what to run inside a Codespace |
+| `scripts/run.sh` | Main entry point (see Quick start) - also what runs inside a Codespace |
+| `scripts/run-in-codespace.sh` | Auto-run by run.sh on non-x86_64 hosts (see Apple Silicon note above) |
+| `scripts/fix-codespace-permissions.sh` | Auto-run by the above to fix gh auth/scope/repo-access issues |
 | `scripts/stop.sh` | Tears the containers down |
 | `scripts/lib.sh` | Shared shell helpers |
 | `.devcontainer/devcontainer.json` | GitHub Codespaces config (native x86_64, see Apple Silicon note above) |

@@ -174,18 +174,36 @@ REMOTE_OUTPUT="$(gh codespace ssh -c "$CODESPACE_NAME" -- \
     || { echo "$REMOTE_OUTPUT" >&2; echo "ERROR: scripts/run.sh failed inside the Codespace." >&2; exit 1; }
 echo "$REMOTE_OUTPUT"
 
-REMOTE_PORT="$(echo "$REMOTE_OUTPUT" | sed -n 's/.*Host port: \([0-9]\+\).*/\1/p' | head -1)"
+REMOTE_PORT="$(echo "$REMOTE_OUTPUT" | sed -n -E 's/.*Host port: ([0-9]+).*/\1/p' | head -1)"
 if [ -z "$REMOTE_PORT" ]; then
     echo "ERROR: couldn't determine which port scvis is listening on in the Codespace." >&2
     exit 1
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Look up the browser URL GitHub assigned to that port. This is detected
-#    automatically as soon as something listens on it - no explicit forward
-#    needed (verified: `gh codespace ports` shows it immediately).
+# 4. Look up the browser URL GitHub assigned to that port. Port 8080 is
+#    statically declared in devcontainer.json so it's already registered,
+#    but a fallback port (e.g. if 8080 was briefly held by a previous run's
+#    container during a rebuild) isn't - `gh codespace ports` doesn't watch
+#    for new listeners dynamically, it only shows what's been registered.
+#    A *brief* `ports forward` registers it with GitHub's forwarding service
+#    even after that forward session ends (verified live: the registration
+#    persists once made) - this is a one-shot nudge, not a sustained tunnel,
+#    so it doesn't run into the raw-TCP reliability problem documented in
+#    README.md (that was specifically about carrying vaccs_comm's protocol
+#    through a *sustained* forward).
 # ---------------------------------------------------------------------------
 BROWSE_URL="$(gh codespace ports --json sourcePort,browseUrl -c "$CODESPACE_NAME" -q ".[] | select(.sourcePort==${REMOTE_PORT}) | .browseUrl" 2>/dev/null || true)"
+if [ -z "$BROWSE_URL" ]; then
+    echo "Port $REMOTE_PORT isn't registered with GitHub's forwarding service yet - registering it."
+    LOCAL_PROBE_PORT="$(find_free_port 19999)"
+    gh codespace ports forward "${REMOTE_PORT}:${LOCAL_PROBE_PORT}" -c "$CODESPACE_NAME" >/dev/null 2>&1 &
+    REG_PID=$!
+    sleep 3
+    kill "$REG_PID" 2>/dev/null || true
+    wait "$REG_PID" 2>/dev/null || true
+    BROWSE_URL="$(gh codespace ports --json sourcePort,browseUrl -c "$CODESPACE_NAME" -q ".[] | select(.sourcePort==${REMOTE_PORT}) | .browseUrl" 2>/dev/null || true)"
+fi
 if [ -z "$BROWSE_URL" ]; then
     echo "ERROR: GitHub hasn't assigned a forwarding URL for port $REMOTE_PORT yet." >&2
     echo "Try: gh codespace ports -c $CODESPACE_NAME" >&2
