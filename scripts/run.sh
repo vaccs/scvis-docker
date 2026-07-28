@@ -48,7 +48,9 @@ if [ "$FORCE_LOCAL" -ne 1 ] && [ "$(uname -m)" != "x86_64" ]; then
     if [ "$OPEN_BROWSER" -eq 0 ]; then
         HANDOFF_ARGS+=(--no-browser)
     fi
-    exec ./scripts/run-in-codespace.sh "${HANDOFF_ARGS[@]}"
+    # ${arr[@]+"${arr[@]}"}, not "${arr[@]}": macOS ships bash 3.2, where an
+    # empty array under `set -u` trips "unbound variable" on plain "${arr[@]}".
+    exec ./scripts/run-in-codespace.sh ${HANDOFF_ARGS[@]+"${HANDOFF_ARGS[@]}"}
 fi
 
 echo "== Checking Docker installation =="
