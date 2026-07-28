@@ -210,8 +210,12 @@ if [ -z "$BROWSE_URL" ]; then
     exit 1
 fi
 
+# scvis-go only registers routes under /scvis/... (see cmd/web/routes.go) -
+# nothing handles the bare origin, so it 404s without this.
+APP_URL="${BROWSE_URL}/scvis/"
+
 echo ""
-echo "scvis is up: $BROWSE_URL"
+echo "scvis is up: $APP_URL"
 echo "(private by default - opens fine in a browser you're already logged into GitHub with;"
 echo " to share it, run: gh codespace ports visibility ${REMOTE_PORT}:public -c $CODESPACE_NAME)"
 echo "Default admin login (first run only): ${SEED_ADMIN_NAME:-admin} / ${SEED_ADMIN_PASSWORD:-admin1234}"
@@ -221,5 +225,5 @@ echo "Stop the Codespace:  gh codespace stop -c $CODESPACE_NAME"
 echo ""
 
 if [ "$OPEN_BROWSER" -eq 1 ]; then
-    open_browser "$BROWSE_URL"
+    open_browser "$APP_URL"
 fi
